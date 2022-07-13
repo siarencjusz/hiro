@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "hiro"
+version = "0.1.0"
+description = ""
+authors = ["Siarencjusz"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+numpy = "^1.23.1"
+pylint = "^2.14.4"
+jupyter = "^1.0.0"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
