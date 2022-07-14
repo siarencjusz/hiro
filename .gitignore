@@ -130,5 +130,6 @@ dmypy.json
 
 # Project
 secrets/
+input_imgs/
 .idea/
 poetry.lock
