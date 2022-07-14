@@ -57,7 +57,6 @@ if __name__ == '__main__':
     BATCH_SIZE = 4
     ADAM_LEARNING_RATE = 1e-3
 
-
     # pylint: disable=invalid-name
     def conv_net_fun(x):
         """
@@ -74,7 +73,7 @@ if __name__ == '__main__':
 
     def mse(model_params, input_data, actual):
         """
-        Functional wrapper for haiku model
+        Functional wrapper for haiku model loss function
         :param model_params: model parameters
         :param input_data: input data for a forward pass
         :param actual: ground truth to calculate loss
