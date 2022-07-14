@@ -51,4 +51,4 @@ if __name__ == '__main__':
     mongo.hiro.preprocessed_imgs.insert_one(
         serialize_jarray_for_mongo(train_imgs, f'train_{DATASET_VERSION}'))
     mongo.hiro.preprocessed_imgs.insert_one(
-        serialize_jarray_for_mongo(train_imgs, f'valid_{DATASET_VERSION}'))
+        serialize_jarray_for_mongo(valid_imgs, f'valid_{DATASET_VERSION}'))
