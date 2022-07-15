@@ -32,22 +32,35 @@ def preprocess_imgs(input_imgs: pymongo.collection, img_names: list) -> jnp.ndar
     return jnp.stack(preprocessed_imgs, axis=0)
 
 
+def upload_dataset_to_mongo(mongo_collection, dataset_name, data):
+    """
+    Upload dataset into a mongodb collection storing each sample as a separate document
+    :param mongo_collection: Mongodb collection for uploading
+    :param dataset_name: name of the dataset to be uploaded, sample id will be attached
+    :param data: array for upload to a mongodb
+    """
+    for sample_id, sample in tqdm(enumerate(data), unit='sample',
+                                  desc=f'Upload {dataset_name} to mongodb'):
+        serialized_sample = serialize_jarray_for_mongo(sample, f'{dataset_name}_{sample_id}')
+        mongo_collection.insert_one(serialized_sample)
+
+
 if __name__ == '__main__':
 
     TRAIN_PIXELS = 128  # width and height of training image
-    RANDOM_CROP_COUNT = 16
-    TRAIN_VALID_SPLIT = 0.8
-    DATASET_VERSION = 1  # Used to generate dataset id
+    RANDOM_CROP_COUNT = 64
+    TRAIN_VALID_SPLIT = 0.6
+    DATASET_NAME = 'dataset_3'  # Name of mongo collection to be created
 
+    # Input data to be preprocessed are stored in input_imgs collection
     mongo = MongoClient(get_secret('mongo_connection_string'))
     img_ids = mongo.hiro.input_imgs.distinct('_id')
+
+    # Input images are split into train a valid subsets
     train_imgs_names = img_ids[:int(TRAIN_VALID_SPLIT * len(img_ids))]
-    valid_imgs_names = img_ids[int(TRAIN_VALID_SPLIT * len(img_ids)):]
-
     train_imgs = preprocess_imgs(mongo.hiro.input_imgs, train_imgs_names)
-    valid_imgs = preprocess_imgs(mongo.hiro.input_imgs, valid_imgs_names)
+    upload_dataset_to_mongo(mongo.hiro[DATASET_NAME], 'train', train_imgs)
 
-    mongo.hiro.preprocessed_imgs.insert_one(
-        serialize_jarray_for_mongo(train_imgs, f'train_{DATASET_VERSION}'))
-    mongo.hiro.preprocessed_imgs.insert_one(
-        serialize_jarray_for_mongo(valid_imgs, f'valid_{DATASET_VERSION}'))
+    valid_imgs_names = img_ids[int(TRAIN_VALID_SPLIT * len(img_ids)):]
+    valid_imgs = preprocess_imgs(mongo.hiro.input_imgs, valid_imgs_names)
+    upload_dataset_to_mongo(mongo.hiro[DATASET_NAME], 'valid', valid_imgs)
