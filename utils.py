@@ -1,7 +1,10 @@
 """Set of utilities functions"""
 from io import BytesIO
-from PIL import Image as pil
+import jax
 import jax.numpy as jnp
+from PIL import Image as pil
+from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 
 def get_secret(secret_name, secret_dir='./secrets/'):
@@ -37,7 +40,7 @@ def serialize_jarray_for_mongo(jarray: jnp.ndarray, mongo_id: str) -> dict:
             'dtype': str(jarray.dtype)}
 
 
-def deserialize_jarray_from_mongo(serialized_jarray: dict) -> jnp.ndarray:
+def jarray_from_mongo(serialized_jarray: dict) -> jnp.ndarray:
     """
     Deserialize mongodb object into a jax array restoring its content, dtype and shape
     :param serialized_jarray: an object returned from find or findOne mongo collection
@@ -45,3 +48,51 @@ def deserialize_jarray_from_mongo(serialized_jarray: dict) -> jnp.ndarray:
     """
     return jnp.frombuffer(serialized_jarray['content'],
                           dtype=serialized_jarray['dtype']).reshape(serialized_jarray['shape'])
+
+
+def calculate_img_residual(imgs: jnp.ndarray) -> jnp.ndarray:
+    """
+    Calculate images residuals for recovery by down-sampling then up-sampling input images
+    :param imgs: input images for residuals calculation with shape (sample, width, height, channel)
+    :return: Residual per each image for details recovery
+    """
+    imgs_down = jax.image.resize(imgs, jnp.array(imgs.shape) //
+                                 jnp.array([1, 2, 2, 1]), method='bicubic')
+    imgs_up = jax.image.resize(imgs_down, imgs.shape, method='bicubic')
+    return imgs - imgs_up
+
+
+def download_dataset(mongo_collection, sample_regex):
+    """
+    Download dataset from mongodb collection
+    :param mongo_collection: mongodb collection containing a dataset
+    :param sample_regex: regex expression for basic filtering of a dataset
+    :return: stacked along first axis samples downloaded from a mongodb
+    """
+    return jnp.stack([jarray_from_mongo(sample)
+                      for sample in tqdm(mongo_collection.find({'_id': {'$regex': sample_regex}}),
+                                         desc=f'Download {sample_regex} samples from mongodb',
+                                         unit='sample',)], axis=0)
+
+
+def plot_sample(original, residual, prediction=None, scale=0.2):
+    """
+    Plot original image, target residual and optionally prediction,
+    scaling desired output to a predefined value
+    :param original: original image
+    :param residual: target residuals
+    :param prediction: predicted residuals
+    :param scale: residual from zero up to scale is plot, bigger values are clipped
+    """
+    plt.figure(figsize=(18 if prediction else 12, 6))
+    plt.subplot(1, 3 if prediction else 2, 1)
+    plt.imshow(original)
+    plt.subplot(1, 3 if prediction else 2, 2)
+    scaled_residual = jnp.minimum(jnp.maximum(-0.5, residual / scale), 0.5) + 0.5
+    plt.imshow(scaled_residual)
+    if prediction:
+        plt.subplot(1, 3, 3)
+        scaled_prediction = jnp.minimum(jnp.maximum(-0.5, prediction / scale), 0.5) + 0.5
+        plt.imshow(scaled_prediction)
+    plt.tight_layout()
+    plt.show()

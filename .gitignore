@@ -131,5 +131,7 @@ dmypy.json
 # Project
 secrets/
 input_imgs/
+train_plots/
+valid_plots/
 .idea/
 poetry.lock

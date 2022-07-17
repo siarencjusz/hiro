@@ -5,7 +5,7 @@ import optax
 import haiku as hk
 from pymongo import MongoClient
 import wandb
-from utils import get_secret, deserialize_jarray_from_mongo
+from utils import get_secret, download_dataset, calculate_img_residual
 
 
 class CNN(hk.Module):
@@ -22,24 +22,12 @@ class CNN(hk.Module):
         return self.conv_model(x_batch)
 
 
-def calculate_residual(imgs: jnp.ndarray) -> jnp.ndarray:
-    """
-    Calculate images residuals for recovery by down-sampling then up-sampling input images
-    :param imgs: input images for residuals calculation with shape (sample, width, height, channel)
-    :return: Residual per each image for details recovery
-    """
-    imgs_down = jax.image.resize(imgs, jnp.array(train_imgs.shape) //
-                                 jnp.array([1, 2, 2, 1]), method='bicubic')
-    imgs_up = jax.image.resize(imgs_down, imgs.shape, method='bicubic')
-    return imgs - imgs_up
-
-
 if __name__ == '__main__':
 
-    wandb.init(project="HiRo", name='CNN early experiments')
+    wandb.init(project="HiRo", name='CNN with gradient clipping')
     wandb.config = {
         'learning_rate': 0.01,
-        'weight_decay': 0.001,
+        'weight_decay': 0.0001,
         'epochs': 8,
         'batch_size': 8,
         'gradient_clip': 0.001,
@@ -51,16 +39,12 @@ if __name__ == '__main__':
 
     mongo = MongoClient(get_secret('mongo_connection_string'))
 
-    query = {'_id': {'$regex': 'train'}}
-    train_imgs = jnp.stack([deserialize_jarray_from_mongo(sample)
-                            for sample in mongo.hiro[wandb.config['dataset']].find(query)], axis=0)
-    train_out = calculate_residual(train_imgs)
+    train_imgs = download_dataset(mongo.hiro[wandb.config['dataset']], 'train')
+    train_out = calculate_img_residual(train_imgs)
     train_in = train_imgs - train_out
 
-    query = {'_id': {'$regex': 'valid'}}
-    valid_imgs = jnp.stack([deserialize_jarray_from_mongo(sample)
-                            for sample in mongo.hiro[wandb.config['dataset']].find(query)], axis=0)
-    valid_out = calculate_residual(valid_imgs)
+    valid_imgs = download_dataset(mongo.hiro[wandb.config['dataset']], 'valid')
+    valid_out = calculate_img_residual(valid_imgs)
     valid_in = valid_imgs - valid_out
 
     rng = jax.random.PRNGKey(220714)
@@ -71,7 +55,7 @@ if __name__ == '__main__':
     def conv_net_fun(x):
         """
         Functional wrapper for cnn model
-        :type x: model input
+        :param x: model input
         """
         cnn = CNN(wandb.config)
         return cnn(x)
@@ -93,6 +77,7 @@ if __name__ == '__main__':
         predicted = conv_net.apply(model_params, rng, input_data)
         return jnp.mean(actual - predicted) ** 2
 
+    clip_limit = wandb.config['gradient_clip'] / wandb.config['learning_rate']
     batches = jnp.arange((train_in.shape[0] // BATCH_SIZE) + 1)
     for epoch in range(wandb.config['epochs']):
 
@@ -104,10 +89,8 @@ if __name__ == '__main__':
 
             loss, param_grads = jax.value_and_grad(mse)(params, train_in[start:end],
                                                         train_out[start:end])
-
-            jax.tree_map(jnp.max, param_grads)
-            jax.tree_map(jnp.min, param_grads)
-
+            jax.tree_map(lambda array: jnp.minimum(jnp.maximum(-clip_limit, array), clip_limit),
+                         param_grads)
             updates, optimizer_state = optimizer.update(param_grads, optimizer_state, params)
             params = optax.apply_updates(params, updates)
             wandb.log({"gradient": param_grads}, step=epoch)
