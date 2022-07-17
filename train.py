@@ -5,7 +5,7 @@ import optax
 import haiku as hk
 from pymongo import MongoClient
 import wandb
-from utils import get_secret, download_dataset, calculate_img_residual
+from utils import get_secret, download_dataset, calculate_img_residual, plot_sample
 
 
 class CNN(hk.Module):
@@ -26,11 +26,11 @@ if __name__ == '__main__':
 
     wandb.init(project="HiRo", name='CNN with gradient clipping')
     wandb.config = {
-        'learning_rate': 0.01,
+        'learning_rate': 0.1,
         'weight_decay': 0.0001,
         'epochs': 8,
         'batch_size': 8,
-        'gradient_clip': 0.001,
+        'gradient_clip': 0.01,
         'cnn_layers': 5,
         'cnn_filters': 32,
         'dataset': 'dataset_3'
@@ -48,6 +48,7 @@ if __name__ == '__main__':
     valid_in = valid_imgs - valid_out
 
     rng = jax.random.PRNGKey(220714)
+    DEBUG_PLOT = True
     EPOCHS = wandb.config['epochs']
     BATCH_SIZE = wandb.config['batch_size']
 
@@ -75,7 +76,10 @@ if __name__ == '__main__':
         :return: mse loss
         """
         predicted = conv_net.apply(model_params, rng, input_data)
-        return jnp.mean(actual - predicted) ** 2
+        return jnp.mean((actual - predicted) ** 2)
+
+    # if DEBUG_PLOT:
+    #     plot_sample(train_in[8], train_out[8])
 
     clip_limit = wandb.config['gradient_clip'] / wandb.config['learning_rate']
     batches = jnp.arange((train_in.shape[0] // BATCH_SIZE) + 1)
@@ -89,17 +93,27 @@ if __name__ == '__main__':
 
             loss, param_grads = jax.value_and_grad(mse)(params, train_in[start:end],
                                                         train_out[start:end])
-            jax.tree_map(lambda array: jnp.minimum(jnp.maximum(-clip_limit, array), clip_limit),
-                         param_grads)
+            # jax.tree_map(lambda array: jnp.minimum(jnp.maximum(-clip_limit, array), clip_limit),
+            #              param_grads)
+
             updates, optimizer_state = optimizer.update(param_grads, optimizer_state, params)
             params = optax.apply_updates(params, updates)
             wandb.log({"gradient": param_grads}, step=epoch)
 
-        train_loss = mse(params, train_in, train_out)
-        valid_loss = mse(params, valid_in, valid_out)
-        wandb.log({"train_loss": train_loss}, step=epoch)
-        wandb.log({"valid_loss": valid_loss}, step=epoch)
+        if DEBUG_PLOT:
+            plot_predicted = conv_net.apply(params, rng, train_in)
+            plot_sample(train_in[8], train_out[8], plot_predicted[8])
+
+        train_mse = mse(params, train_in, train_out)
+        valid_mse = mse(params, valid_in, valid_out)
+
+        metrics = {'train_mse': train_mse,
+                   'valid_mse': valid_mse,
+                   'train_psnr': 10 * jnp.log10(1 / train_mse),
+                   'valid_psnr': 10 * jnp.log10(1 / valid_mse)
+                   }
+        wandb.log(metrics, step=epoch)
 
         print(f'Epoch {epoch}, '
-              f'train mse = {jnp.mean(train_loss)}, '
-              f'valid mse = {jnp.mean(valid_loss)}')
+              f'train psnr = {jnp.round(metrics["train_psnr"], 2)}, '
+              f'valid psnr = {jnp.round(metrics["valid_psnr"], 2)}')

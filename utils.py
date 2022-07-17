@@ -75,24 +75,31 @@ def download_dataset(mongo_collection, sample_regex):
                                          unit='sample',)], axis=0)
 
 
-def plot_sample(original, residual, prediction=None, scale=0.2):
+def plot_sample(original, residual, prediction=None, out_file_name=None, max_value=0.2):
     """
     Plot original image, target residual and optionally prediction,
     scaling desired output to a predefined value
     :param original: original image
     :param residual: target residuals
     :param prediction: predicted residuals
-    :param scale: residual from zero up to scale is plot, bigger values are clipped
+    :param max_value: residual from zero up to scale is plot, bigger values are clipped
+    :param out_file_name: if provided output is stored instead of plotted
     """
-    plt.figure(figsize=(18 if prediction else 12, 6))
-    plt.subplot(1, 3 if prediction else 2, 1)
+    plt.figure(figsize=(18 if isinstance(prediction, jnp.ndarray) else 12, 6))
+    plt.subplot(1, 3 if isinstance(prediction, jnp.ndarray) else 2, 1)
+    plt.axis('off')
     plt.imshow(original)
-    plt.subplot(1, 3 if prediction else 2, 2)
-    scaled_residual = jnp.minimum(jnp.maximum(-0.5, residual / scale), 0.5) + 0.5
+    plt.subplot(1, 3 if isinstance(prediction, jnp.ndarray) else 2, 2)
+    scaled_residual = jnp.minimum(jnp.maximum(-0.5, residual / max_value), 0.5) + 0.5
+    plt.axis('off')
     plt.imshow(scaled_residual)
-    if prediction:
+    if isinstance(prediction, jnp.ndarray):
         plt.subplot(1, 3, 3)
-        scaled_prediction = jnp.minimum(jnp.maximum(-0.5, prediction / scale), 0.5) + 0.5
+        scaled_prediction = jnp.minimum(jnp.maximum(-0.5, prediction / max_value), 0.5) + 0.5
+        plt.axis('off')
         plt.imshow(scaled_prediction)
     plt.tight_layout()
-    plt.show()
+    if out_file_name:
+        plt.savefig(out_file_name)
+    else:
+        plt.show()
