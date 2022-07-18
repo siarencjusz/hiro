@@ -1,9 +1,11 @@
 """Script for training for local testing of the pipeline"""
+import os
 import jax
 from jax import numpy as jnp
 import optax
 import haiku as hk
 from pymongo import MongoClient
+from tqdm import tqdm
 import wandb
 from utils import get_secret, download_dataset, calculate_img_residual, plot_samples
 
@@ -28,20 +30,24 @@ class CNN(hk.Module):
 
 if __name__ == '__main__':
 
-    wandb.init(project="HiRo", name='CNN with gradient clipping')
+    os.environ["WANDB_API_KEY"] = get_secret('wandb_api_key')
+    os.environ["WANDB_MODE"] = "offline"
+
+    wandb.init(project="HiRo", name='CNN, 21pixels, clipping, L2',
+               settings=wandb.Settings(start_method="thread"))
     wandb.config = {
         'learning_rate': 0.1,
         'optimizer': 'sgd',
+        'weight_decay': 0.0001,
         'sgd_momentum': 0.9,
         'epochs': 32,
         'batch_size': 64,
         'gradient_clip': 0.0001,
         'cnn_layers': 10,
         'cnn_filters': 64,
-        'dataset': 'dataset_5'
+        'dataset': 'dataset_7'
     }
     wandb.log(wandb.config)
-
     mongo = MongoClient(get_secret('mongo_connection_string'))
 
     train_imgs = download_dataset(mongo.hiro[wandb.config['dataset']], 'train')
@@ -75,7 +81,7 @@ if __name__ == '__main__':
 
     def mse(model_params, input_data, actual):
         """
-        Functional wrapper for haiku model loss function
+        Functional wrapper for mean square error of a haiku model
         :param model_params: model parameters
         :param input_data: input data for a forward pass
         :param actual: ground truth to calculate loss
@@ -84,10 +90,24 @@ if __name__ == '__main__':
         predicted = conv_net.apply(model_params, rng, input_data)
         return jnp.mean(jnp.sum((actual - predicted) ** 2, axis=(1, 2, 3)))
 
+    def loss(model_params, input_data, actual, weight_decay):
+        """
+        Functional wrapper for haiku model loss function
+        :param model_params: model parameters
+        :param input_data: input data for a forward pass
+        :param actual: ground truth to calculate loss
+        :param weight_decay: a weight for weight decay regularization
+        :return: mse loss
+        """
+        all_params, _ = jax.tree_flatten(model_params)
+        flat_params = jnp.concatenate([param.flatten() for param in all_params])
+        return mse(model_params, input_data, actual) \
+            + weight_decay * jnp.sum(flat_params ** 2)
+
     clip_limit = wandb.config['gradient_clip'] / wandb.config['learning_rate']
     sample_key = jax.random.PRNGKey(0)
 
-    for epoch in range(wandb.config['epochs']):
+    for epoch in (pbar := tqdm(range(wandb.config['epochs']), desc='Train', unit='epoch')):
 
         shuffle_id = jax.random.choice(sample_key, train_in.shape[0], [train_in.shape[0]],
                                        replace=False)
@@ -98,9 +118,9 @@ if __name__ == '__main__':
         for batch_start in range(0, train_in.shape[0], BATCH_SIZE):
             batch_end = min(batch_start + BATCH_SIZE, train_in.shape[0])
 
-            loss, param_grads = jax.value_and_grad(mse)(params,
-                                                        train_in_shuffled[batch_start:batch_end],
-                                                        train_out_shuffled[batch_start:batch_end])
+            param_grads = jax.grad(loss)(params, train_in_shuffled[batch_start:batch_end],
+                                         train_out_shuffled[batch_start:batch_end],
+                                         wandb.config['weight_decay'])
 
             param_grads = jax.tree_map(lambda x: jnp.maximum(x, -clip_limit), param_grads)
             param_grads = jax.tree_map(lambda x: jnp.minimum(x, clip_limit), param_grads)
@@ -109,9 +129,15 @@ if __name__ == '__main__':
             params = optax.apply_updates(params, updates)
 
         if DEBUG_PLOT:
-            plot_idx = jnp.array([8, 12, 14, 16, 17])
-            plot_predicted = conv_net.apply(params, rng, train_in[plot_idx])
-            plot_samples(train_in[plot_idx], train_out[plot_idx], plot_predicted)
+            plot_train_idx = jnp.array([8, 12])
+            plot_valid_idx = jnp.array([0, 1, 4, 5])
+
+            plot_train_predicted = conv_net.apply(params, rng, train_in[plot_train_idx])
+            plot_valid_predicted = conv_net.apply(params, rng, valid_in[plot_valid_idx])
+            plot_samples(
+                jnp.concatenate((train_in[plot_train_idx], valid_in[plot_valid_idx]), axis=0),
+                jnp.concatenate((train_out[plot_train_idx], valid_out[plot_valid_idx]), axis=0),
+                jnp.concatenate((plot_train_predicted, plot_valid_predicted), axis=0))
 
         train_mse = mse(params, train_in, train_out)
         valid_mse = mse(params, valid_in, valid_out)
@@ -125,6 +151,5 @@ if __name__ == '__main__':
                    }
         wandb.log(metrics, step=epoch)
 
-        print(f'Epoch {epoch}, '
-              f'train psnr = {jnp.round(metrics["train_psnr"], 2)}, '
-              f'valid psnr = {jnp.round(metrics["valid_psnr"], 2)}')
+        pbar.set_description(f'Train psnr = {metrics["train_psnr"]:.2f}dB, '
+                             f'valid psnr = {metrics["valid_psnr"]:.2f}dB')

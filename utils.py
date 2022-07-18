@@ -1,7 +1,7 @@
 """Set of utilities functions"""
 from io import BytesIO
 import jax
-import jax.numpy as jnp
+from jax import numpy as jnp
 from PIL import Image as pil
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -135,3 +135,19 @@ def plot_samples(originals, residuals, predictions, out_file_name=None, max_valu
         plt.savefig(out_file_name)
     else:
         plt.show()
+
+
+def plot_imgs(imgs, rows, cols):
+    """
+    Plot input imgs in a defined grid
+    :param imgs: images to be plotted in a shape of (sample, width, height, channel)
+    :param rows: how many rows of images to be plotted
+    :param cols: how many cols of images to be plotted
+    """
+    plt.figure(figsize=(rows * 2 ,cols * 2))
+    for sample, img in enumerate(imgs):
+        plt.subplot(rows, cols, sample + 1)
+        plt.axis('off')
+        plt.imshow(img)
+    plt.tight_layout()
+    plt.show()

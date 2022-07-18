@@ -8,11 +8,26 @@ import dm_pix as pix
 from utils import get_secret, load_image, serialize_jarray_for_mongo
 
 
-def preprocess_imgs(input_imgs: pymongo.collection, img_names: list) -> jnp.ndarray:
+def color_range(img):
+    """
+    Calculate the maximum distance between any 2 pixels as a L2 for all three RGB channels
+    :param img: image in a shape of (width, height, channel)
+    :return: L2 distance between any 2 pixels of the input image
+    """
+    flat_img = img.reshape(-1, 3)
+    return jnp.max(jnp.sum(
+        (flat_img[jnp.newaxis, :, :] - flat_img[:, jnp.newaxis, :]) ** 2,
+        axis=2), axis=(0, 1))
+
+
+def preprocess_imgs(input_imgs: pymongo.collection, img_names: list,
+                    color_range_threshold: float = 0.05) -> jnp.ndarray:
     """
     Preprocess input images in mongodb into a jnp array for training
     :param input_imgs: mongodb collection containing images jpg streams
     :param img_names: _id of mongodb collection to be preprocessed
+    :param color_range_threshold: a threshold of a minimum color range for ready image to be
+    accepted for a dataset
     :return: jnp array of preprocessed images ready for training
     """
     preprocessed_imgs = []
@@ -27,7 +42,8 @@ def preprocess_imgs(input_imgs: pymongo.collection, img_names: list) -> jnp.ndar
         for crop_key in crop_keys:
             crop_img = pix.random_crop(key=jax.random.PRNGKey(crop_key), image=img,
                                        crop_sizes=(TRAIN_PIXELS, TRAIN_PIXELS, 3))
-            preprocessed_imgs.append(crop_img)
+            if color_range(crop_img) > color_range_threshold ** 2:
+                preprocessed_imgs.append(crop_img)
 
     return jnp.stack(preprocessed_imgs, axis=0)
 
@@ -46,11 +62,10 @@ def upload_dataset_to_mongo(mongo_collection, dataset_name, data):
 
 
 if __name__ == '__main__':
-
     TRAIN_PIXELS = 21  # width and height of training image
-    RANDOM_CROP_COUNT = 512
+    RANDOM_CROP_COUNT = 1024
     TRAIN_VALID_SPLIT = 0.6
-    DATASET_NAME = 'dataset_5'  # Name of mongo collection to be created
+    DATASET_NAME = 'dataset_7'  # Name of mongo collection to be created
 
     # Input data to be preprocessed are stored in input_imgs collection
     mongo = MongoClient(get_secret('mongo_connection_string'))
