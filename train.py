@@ -5,18 +5,22 @@ import optax
 import haiku as hk
 from pymongo import MongoClient
 import wandb
-from utils import get_secret, download_dataset, calculate_img_residual, plot_sample
+from utils import get_secret, download_dataset, calculate_img_residual, plot_samples
 
 
 class CNN(hk.Module):
     """Simple sequential convolutional neural network"""
     def __init__(self, arch):
         super().__init__(name="CNN")
-        self.conv_model = hk.Sequential(sum([[
-            hk.Conv2D(output_channels=arch['cnn_filters'], kernel_shape=(3, 3), padding="SAME"),
-            jax.nn.relu] for _ in range(arch['cnn_layers'] - 1)], []) +
-            [hk.Conv2D(output_channels=3, kernel_shape=(3, 3), padding="SAME", name='cnn_out'),
-             jax.nn.relu])
+
+        layers = []
+        for _ in range(arch['cnn_layers'] - 1):
+            layers.append(hk.Conv2D(output_channels=arch['cnn_filters'],
+                                    kernel_shape=(3, 3), padding="SAME"))
+            layers.append(jax.nn.relu)
+        layers.append(hk.Conv2D(output_channels=3, kernel_shape=(3, 3),
+                                padding="SAME", name='cnn_out'))
+        self.conv_model = hk.Sequential(layers)
 
     def __call__(self, x_batch):
         return self.conv_model(x_batch)
@@ -27,13 +31,14 @@ if __name__ == '__main__':
     wandb.init(project="HiRo", name='CNN with gradient clipping')
     wandb.config = {
         'learning_rate': 0.1,
-        'weight_decay': 0.0001,
-        'epochs': 8,
-        'batch_size': 8,
-        'gradient_clip': 0.01,
-        'cnn_layers': 5,
-        'cnn_filters': 32,
-        'dataset': 'dataset_3'
+        'optimizer': 'sgd',
+        'sgd_momentum': 0.9,
+        'epochs': 32,
+        'batch_size': 64,
+        'gradient_clip': 0.0001,
+        'cnn_layers': 10,
+        'cnn_filters': 64,
+        'dataset': 'dataset_5'
     }
     wandb.log(wandb.config)
 
@@ -63,8 +68,9 @@ if __name__ == '__main__':
 
     conv_net = hk.transform(conv_net_fun)
     params = conv_net.init(rng, train_in[:2])
-    optimizer = optax.adamw(learning_rate=wandb.config['learning_rate'],
-                            weight_decay=wandb.config['weight_decay'])
+
+    optimizer = optax.sgd(learning_rate=wandb.config['learning_rate'],
+                          momentum=wandb.config['sgd_momentum'])
     optimizer_state = optimizer.init(params)
 
     def mse(model_params, input_data, actual):
@@ -76,41 +82,46 @@ if __name__ == '__main__':
         :return: mse loss
         """
         predicted = conv_net.apply(model_params, rng, input_data)
-        return jnp.mean((actual - predicted) ** 2)
-
-    # if DEBUG_PLOT:
-    #     plot_sample(train_in[8], train_out[8])
+        return jnp.mean(jnp.sum((actual - predicted) ** 2, axis=(1, 2, 3)))
 
     clip_limit = wandb.config['gradient_clip'] / wandb.config['learning_rate']
-    batches = jnp.arange((train_in.shape[0] // BATCH_SIZE) + 1)
+    sample_key = jax.random.PRNGKey(0)
+
     for epoch in range(wandb.config['epochs']):
 
-        for batch in batches:
-            if batch != batches[-1]:
-                start, end = int(batch * BATCH_SIZE), int(batch * BATCH_SIZE + BATCH_SIZE)
-            else:
-                start, end = int(batch * BATCH_SIZE), None
+        shuffle_id = jax.random.choice(sample_key, train_in.shape[0], [train_in.shape[0]],
+                                       replace=False)
+        sample_key = jax.random.PRNGKey(shuffle_id[0])
+        train_in_shuffled = train_in[shuffle_id]
+        train_out_shuffled = train_out[shuffle_id]
 
-            loss, param_grads = jax.value_and_grad(mse)(params, train_in[start:end],
-                                                        train_out[start:end])
-            # jax.tree_map(lambda array: jnp.minimum(jnp.maximum(-clip_limit, array), clip_limit),
-            #              param_grads)
+        for batch_start in range(0, train_in.shape[0], BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, train_in.shape[0])
 
-            updates, optimizer_state = optimizer.update(param_grads, optimizer_state, params)
+            loss, param_grads = jax.value_and_grad(mse)(params,
+                                                        train_in_shuffled[batch_start:batch_end],
+                                                        train_out_shuffled[batch_start:batch_end])
+
+            param_grads = jax.tree_map(lambda x: jnp.maximum(x, -clip_limit), param_grads)
+            param_grads = jax.tree_map(lambda x: jnp.minimum(x, clip_limit), param_grads)
+
+            updates, optimizer_state = optimizer.update(param_grads, optimizer_state)
             params = optax.apply_updates(params, updates)
-            wandb.log({"gradient": param_grads}, step=epoch)
 
         if DEBUG_PLOT:
-            plot_predicted = conv_net.apply(params, rng, train_in)
-            plot_sample(train_in[8], train_out[8], plot_predicted[8])
+            plot_idx = jnp.array([8, 12, 14, 16, 17])
+            plot_predicted = conv_net.apply(params, rng, train_in[plot_idx])
+            plot_samples(train_in[plot_idx], train_out[plot_idx], plot_predicted)
 
         train_mse = mse(params, train_in, train_out)
         valid_mse = mse(params, valid_in, valid_out)
 
         metrics = {'train_mse': train_mse,
                    'valid_mse': valid_mse,
-                   'train_psnr': 10 * jnp.log10(1 / train_mse),
-                   'valid_psnr': 10 * jnp.log10(1 / valid_mse)
+                   'train_psnr': 10 * jnp.log10((wandb.config['cnn_layers'] * 2 + 1) ** 2 /
+                                                train_mse),
+                   'valid_psnr': 10 * jnp.log10((wandb.config['cnn_layers'] * 2 + 1) ** 2 /
+                                                valid_mse)
                    }
         wandb.log(metrics, step=epoch)
 

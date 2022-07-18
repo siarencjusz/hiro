@@ -47,10 +47,10 @@ def upload_dataset_to_mongo(mongo_collection, dataset_name, data):
 
 if __name__ == '__main__':
 
-    TRAIN_PIXELS = 128  # width and height of training image
-    RANDOM_CROP_COUNT = 64
+    TRAIN_PIXELS = 21  # width and height of training image
+    RANDOM_CROP_COUNT = 512
     TRAIN_VALID_SPLIT = 0.6
-    DATASET_NAME = 'dataset_3'  # Name of mongo collection to be created
+    DATASET_NAME = 'dataset_5'  # Name of mongo collection to be created
 
     # Input data to be preprocessed are stored in input_imgs collection
     mongo = MongoClient(get_secret('mongo_connection_string'))
