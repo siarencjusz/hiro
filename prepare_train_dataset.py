@@ -5,7 +5,9 @@ import pymongo
 from tqdm import tqdm
 from pymongo import MongoClient
 import dm_pix as pix
-from utils import get_secret, load_image, serialize_jarray_for_mongo
+
+from constants import TRAIN_VALID_SPLIT, DATASET_NAME, RANDOM_CROP_COUNT, TRAIN_PIXELS
+from utils import get_secret, load_image, jarray2json
 
 
 def color_range(img):
@@ -57,15 +59,11 @@ def upload_dataset_to_mongo(mongo_collection, dataset_name, data):
     """
     for sample_id, sample in tqdm(enumerate(data), unit='sample',
                                   desc=f'Upload {dataset_name} to mongodb'):
-        serialized_sample = serialize_jarray_for_mongo(sample, f'{dataset_name}_{sample_id}')
+        serialized_sample = jarray2json(sample, f'{dataset_name}_{sample_id}')
         mongo_collection.insert_one(serialized_sample)
 
 
 if __name__ == '__main__':
-    TRAIN_PIXELS = 21  # width and height of training image
-    RANDOM_CROP_COUNT = 1024
-    TRAIN_VALID_SPLIT = 0.6
-    DATASET_NAME = 'dataset_7'  # Name of mongo collection to be created
 
     # Input data to be preprocessed are stored in input_imgs collection
     mongo = MongoClient(get_secret('mongo_connection_string'))

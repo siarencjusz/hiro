@@ -27,7 +27,7 @@ def load_image(raw_buffer: bytes):
     return jnp.array(pil.open(BytesIO(raw_buffer)), dtype=jnp.float32) / 255.
 
 
-def serialize_jarray_for_mongo(jarray: jnp.ndarray, mongo_id: str) -> dict:
+def jarray2json(jarray: jnp.ndarray, mongo_id: str = None) -> dict:
     """
     Serialize input jarray into a json ready for insert into a mongodb collection
     :param jarray: array to be serialized
@@ -40,7 +40,7 @@ def serialize_jarray_for_mongo(jarray: jnp.ndarray, mongo_id: str) -> dict:
             'dtype': str(jarray.dtype)}
 
 
-def jarray_from_mongo(serialized_jarray: dict) -> jnp.ndarray:
+def json2jarray(serialized_jarray: dict) -> jnp.ndarray:
     """
     Deserialize mongodb object into a jax array restoring its content, dtype and shape
     :param serialized_jarray: an object returned from find or findOne mongo collection
@@ -69,7 +69,7 @@ def download_dataset(mongo_collection, sample_regex):
     :param sample_regex: regex expression for basic filtering of a dataset
     :return: stacked along first axis samples downloaded from a mongodb
     """
-    return jnp.stack([jarray_from_mongo(sample)
+    return jnp.stack([json2jarray(sample)
                       for sample in tqdm(mongo_collection.find({'_id': {'$regex': sample_regex}}),
                                          desc=f'Download {sample_regex} samples from mongodb',
                                          unit='sample',)], axis=0)
