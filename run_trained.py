@@ -1,32 +1,15 @@
 """Run trained model through an example image"""
-import os
-import jax
-import matplotlib.pyplot as plt
 from jax import numpy as jnp
 import haiku as hk
 from pymongo import MongoClient
 from tqdm import tqdm
-from cnn_model import CNN
-from constants import EXPERIMENT_NAME, TRAIN_PIXELS, CNN_LAYERS
-from utils import get_secret, calculate_img_residual, plot_samples, json2jarray
 from PIL import Image as pil
 from matplotlib import pyplot as plt
 
-
-def nested_jsons2jarrays(jarrays_tree: dict):
-    """
-    Deserialize nested mongodb objects into a jax arrays for each tree leaf restoring
-    its content, dtype and shape
-    :param jarrays_tree: jarrays in a nested tree which stores mongo serialized jarrays
-    :return: deserialized jax arrays tree
-    """
-
-    # At leaf a serialized array is expected
-    if set(jarrays_tree.keys()) == {'_id', 'content', 'dtype', 'shape'}:
-        result = json2jarray(jarrays_tree)
-    else:
-        result = {k: nested_jsons2jarrays(v) for k, v in jarrays_tree.items()}
-    return result
+from cnn_model import CNN
+from constants import EXPERIMENT_NAME, TRAIN_PIXELS, CNN_LAYERS
+from utils_data import get_secret, nested_jsons2jarrays
+from utils_img import calculate_img_residual
 
 
 if __name__ == '__main__':
@@ -69,12 +52,4 @@ if __name__ == '__main__':
     plt.show()
 
     plt.imshow(img_down + model_res)
-    plt.show()
-
-    example_input = jnp.zeros((1, TRAIN_PIXELS, TRAIN_PIXELS, 3))
-    example_output = conv_net.apply(params, None, line)
-
-
-
-    plt.imshow(example_output[0])
     plt.show()

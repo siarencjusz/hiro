@@ -9,7 +9,8 @@ from pymongo import MongoClient
 from tqdm import tqdm
 import wandb
 from constants import CNN_LAYERS, CNN_FILTERS, DATASET_NAME, EXPERIMENT_NAME
-from utils import get_secret, download_dataset, plot_samples, jarray2json
+from utils_data import get_secret, download_dataset, jarray2json
+from utils_plots import plot_samples
 from cnn_model import CNN
 
 

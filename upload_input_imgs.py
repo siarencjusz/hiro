@@ -2,7 +2,7 @@
 import os
 from pymongo import MongoClient
 from tqdm import tqdm
-from utils import get_secret
+from utils_data import get_secret
 
 if __name__ == '__main__':
 

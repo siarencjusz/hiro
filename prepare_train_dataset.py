@@ -11,7 +11,8 @@ from PIL import Image as pil
 
 from constants import TRAIN_VALID_SPLIT, DATASET_NAME, RANDOM_CROP_COUNT, TRAIN_PIXELS, \
     SCALING_FACTORS
-from utils import get_secret, jarray2json, prepare_input_up_scaled_img
+from utils_img import prepare_input_up_scaled_img
+from utils_data import get_secret, jarray2json
 
 
 def color_range(img):
