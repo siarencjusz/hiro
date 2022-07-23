@@ -133,5 +133,6 @@ secrets/
 input_imgs/
 train_plots/
 valid_plots/
+wandb/
 .idea/
 poetry.lock

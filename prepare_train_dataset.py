@@ -1,13 +1,17 @@
 """Example of an image preprocessing for preparation of a training dataset"""
+from io import BytesIO
+
 import jax
 import jax.numpy as jnp
 import pymongo
 from tqdm import tqdm
 from pymongo import MongoClient
 import dm_pix as pix
+from PIL import Image as pil
 
-from constants import TRAIN_VALID_SPLIT, DATASET_NAME, RANDOM_CROP_COUNT, TRAIN_PIXELS
-from utils import get_secret, load_image, jarray2json
+from constants import TRAIN_VALID_SPLIT, DATASET_NAME, RANDOM_CROP_COUNT, TRAIN_PIXELS, \
+    SCALING_FACTORS
+from utils import get_secret, jarray2json, prepare_input_up_scaled_img
 
 
 def color_range(img):
@@ -34,19 +38,30 @@ def preprocess_imgs(input_imgs: pymongo.collection, img_names: list,
     """
     preprocessed_imgs = []
     for img_name in tqdm(img_names, unit='img', desc='Preprocessing img'):
-        org_img = load_image(input_imgs.find_one({'_id': img_name})['content'])
-        img = jax.image.resize(org_img, jnp.array(org_img.shape) // jnp.array([2, 2, 1]),
-                               method='lanczos5')
-        img -= jnp.minimum(0, jnp.min(img))
-        img /= jnp.maximum(1, jnp.max(img))
-        crop_keys = jax.random.randint(key=jax.random.PRNGKey(123), shape=[RANDOM_CROP_COUNT],
-                                       minval=0, maxval=1e6)
-        for crop_key in crop_keys:
-            crop_img = pix.random_crop(key=jax.random.PRNGKey(crop_key), image=img,
-                                       crop_sizes=(TRAIN_PIXELS, TRAIN_PIXELS, 3))
-            if color_range(crop_img) > color_range_threshold ** 2:
-                preprocessed_imgs.append(crop_img)
 
+        for main_scale in SCALING_FACTORS:
+            # Goal of the preprocessing pipeline is to produce a training dataset
+            # therefore a maximum quality should be kept for a reference image.
+            # A common preprocessing is established to ensure similar quality for all input images.
+            # Down and up scaling should be clearly defined in order for later details reproduction
+            raw_org_img = pil.open(BytesIO(input_imgs.find_one({'_id': img_name})['content']))
+
+            raw_org_img_array = jnp.array(raw_org_img) / 255.0
+            org_img = jax.image.resize(raw_org_img_array, jnp.array(raw_org_img_array.shape)
+                                       // jnp.array([main_scale, main_scale, 1]), method='lanczos5')
+
+            up_scaled_input_img = prepare_input_up_scaled_img(org_img)
+            both_img = jnp.concatenate((org_img, up_scaled_input_img), axis=-1)
+
+            # For training both high and low quality are stored together as a separate channels
+            crop_key = jax.random.PRNGKey(123)
+            for _ in tqdm(range(RANDOM_CROP_COUNT // (main_scale ** 2)),
+                          desc=f'Cropping with scale = {main_scale}', unit='img'):
+                crop_key, subkey = jax.random.split(crop_key)
+                crop_img = pix.random_crop(key=subkey, image=both_img,
+                                           crop_sizes=(TRAIN_PIXELS, TRAIN_PIXELS, 6))
+                if color_range(crop_img[..., :3]) > color_range_threshold ** 2:
+                    preprocessed_imgs.append(crop_img)
     return jnp.stack(preprocessed_imgs, axis=0)
 
 

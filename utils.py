@@ -2,7 +2,9 @@
 from io import BytesIO
 import jax
 from jax import numpy as jnp
+import numpy as np
 from PIL import Image as pil
+import dm_pix as pix
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
@@ -144,10 +146,33 @@ def plot_imgs(imgs, rows, cols):
     :param rows: how many rows of images to be plotted
     :param cols: how many cols of images to be plotted
     """
-    plt.figure(figsize=(rows * 2 ,cols * 2))
+    plt.figure(figsize=(rows * 2, cols * 2))
     for sample, img in enumerate(imgs):
         plt.subplot(rows, cols, sample + 1)
         plt.axis('off')
         plt.imshow(img)
     plt.tight_layout()
     plt.show()
+
+
+def prepare_input_up_scaled_img(org_img: jnp.array) -> jnp.array:
+    """
+    Down scale original images, blur then up scale
+    :param org_img: original high fidelity image
+    :return: blurred image as expected to be the model input
+    """
+    # It is assumed an input might be a blurred image, therefore the original one is
+    # degraded by jpeg low compression then blurr
+    with BytesIO() as low_quality:
+        img_array = np.array(jnp.maximum(jnp.minimum(org_img, 1), 0) * 255, dtype='uint8')
+        pil.fromarray(img_array).save(low_quality, format='jpeg', quality=20)
+        low_quality_buffer = low_quality.getvalue()
+    low_quality_img = load_image(low_quality_buffer)
+    # Down scale and blurr image, this is the expected model input
+    down_scaled_img = jax.image.resize(low_quality_img, jnp.array(low_quality_img.shape)
+                                       // jnp.array([2, 2, 1]), method='lanczos5')
+    raw_input_img = pix.gaussian_blur(down_scaled_img, sigma=0.6, kernel_size=5)
+    # Up scaling is the first input preprocessing step
+    up_scaled_input_img = jax.image.resize(raw_input_img, jnp.array(low_quality_img.shape),
+                                           method='trilinear')
+    return up_scaled_input_img
